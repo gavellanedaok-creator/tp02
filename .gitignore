@@ -1,0 +1,23 @@
+# Python environments and bytecode
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Test and tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local runtime state and secrets
+*.sqlite3
+*.db
+.env
+.env.*
+!.env.example
+
+# Editor and OS files
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
