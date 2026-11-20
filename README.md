@@ -29,84 +29,6 @@ cd tp02
 Los siguientes comandos se ejecutan desde la carpeta `tp02`, donde están
 `app_operator.py` y `requirements.txt`.
 
-### Distribución de responsabilidades
-
-| #     | Apellido y Nombre      | Rol Técnico                                      | Módulos bajo su firma                 | Batería de Pruebas a Defender                                                                                                    |
-| ----- | ---------------------- | ------------------------------------------------ | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| **1** | **Gabriel Avellaneda** | Ingeniero de Robustez, Entradas y Excepciones    | `exceptions.py` `sanitizer.py`        | Validación de nombres de colas, rangos numéricos de *wait time*, sanitización y errores de dominio.                              |
-| **2** | **Hernán Lamadrid**    | Ingeniero de Mensajería y Broker Cloud SQS       | `core_sqs.py`                         | Creación de colas, publicación con atributo `event_id`, consumo *long-polling* y borrado de mensajes (ACK).                       |
-| **3** | **Lorenzo Lamas**      | Ingeniero de Criptografía y Receptor Webhook     | `webhook_crypto.py` `receiver.py`     | Firmas HMAC SHA-256 en tiempo constante (`compare_digest`), mitigación de *replay attacks* (ventana 300s) y respuesta HTTP 202.  |
-| **4** | **Maximiliano Ríos**   | Coordinador de Integración y CLI                | `app_operator.py`                      | Comandos `server`, `emit-webhook` y `worker`, y demostración del circuito completo.                                               |
-
----
-
-### **Detalle de Responsabilidades por Integrante**
-
-#### **1\. Gabriel Avellaneda — Robustez de Entradas y Excepciones**
-
-* **Módulos:** `src/vulcano_telemetry/exceptions.py` y `src/vulcano_telemetry/sanitizer.py`.
-* **Alcance técnico:**
-  * Definir errores del dominio que heredan de `Exception`, como `InvalidQueueNameError`, `InvalidWaitTimeError`, `InvalidSignatureError` y `ReplayAttackError`.
-  * Validar nombres de colas con `^vulcano-[a-z0-9]+-q$` y `WaitTimeSeconds` en el rango de 1 a 20 segundos.
-  * Sanitizar recursivamente campos sensibles antes de encolar los eventos.
-* **Prueba para ejecutar:** `python -m pytest -q tests/test_caos.py -k sanitization_and_queue_parameter_validation`.
-* **Resultado esperado:** una prueba aprobada; se aceptan `vulcano-payments-q` y el tiempo 20, se rechazan `payments`, 0 y 21, y los datos sensibles aparecen como `[REDACTED]`.
-* **Defensa en video:** Muestra las validaciones de nombre, espera y sanitización, y explica qué excepción corresponde a cada entrada inválida.
-
----
-
-#### **2\. Hernán Lamadrid — Mensajería y Broker SQS**
-
-* **Módulo:** `src/vulcano_telemetry/core_sqs.py`.
-* **Alcance técnico:**
-  * Conectar `boto3` con el endpoint local `http://localhost:4566` en la región `us-east-1`.
-  * Crear la cola, enviar eventos con el atributo `event_id`, recibirlos con *long-polling* y borrarlos después de procesarlos.
-  * Traducir errores de operación del SDK a errores del dominio SQS.
-* **Prueba para ejecutar:** `python -m pytest -q tests/test_caos.py -k sqs_client_creates_sends_receives_and_deletes`.
-* **Resultado esperado:** una prueba aprobada; verifica las cuatro operaciones, el atributo `event_id`, la espera de 7 segundos y el borrado con el *receipt handle*. Esta prueba usa un cliente simulado, no requiere iniciar `moto_server`.
-* **Defensa en video:** Muestra las llamadas capturadas por el cliente simulado y explica el flujo de creación, envío, recepción y borrado.
-
----
-
-#### **3\. Lorenzo Lamas — Seguridad Criptográfica y Endpoint Receptor**
-
-* **Módulos:** `src/vulcano_telemetry/webhook_crypto.py` y `src/vulcano_telemetry/receiver.py`.
-* **Alcance técnico:**
-  * Calcular y validar firmas HMAC-SHA256 mediante `hmac.compare_digest`.
-  * Rechazar timestamps con más de 300 segundos de diferencia y evitar aceptar dos veces el mismo `event_id`.
-  * Validar `POST /webhook`, sanitizar el evento y responder `202 Accepted` cuando se encola correctamente.
-* **Pruebas para ejecutar:** `python -m pytest -q tests/test_caos.py -k "signature or timestamp or duplicate_event or future_timestamp or replay"`.
-* **Resultado esperado:** seis pruebas aprobadas; cubren firma válida y adulterada, timestamp expirado, repetición de evento y repetición concurrente en SQLite.
-* **Defensa en video:** Explica los resultados y, con el servidor iniciado, abre otra terminal, configura el mismo secreto local y ejecuta dos veces el mismo evento:
-
-  ```powershell
-  $env:VULCANO_WEBHOOK_SECRET = "secreto-local-de-desarrollo"
-  python .\app_operator.py emit-webhook --url http://127.0.0.1:8000/webhook --event-id prueba-lorenzo
-  python .\app_operator.py emit-webhook --url http://127.0.0.1:8000/webhook --event-id prueba-lorenzo
-  ```
-
-  La primera petición debe responder 202 y la repetición 409.
-
----
-
-#### **4\. Maximiliano Ríos — Integración y CLI**
-
-* **Módulo:** `app_operator.py`.
-* **Alcance técnico:**
-  * Estructurar el CLI con `argparse`: `server` para FastAPI/Uvicorn, `emit-webhook` para enviar una petición firmada y `worker` para consumir eventos.
-  * Integrar y demostrar el flujo entre API, SQS local y worker.
-* **Pruebas para ejecutar:** primero `python .\app_operator.py --help`; después, realizar la prueba integral de las secciones «Cómo ejecutar el proyecto» y «Ejecutar las pruebas».
-* **Resultado esperado:** la ayuda enumera los tres subcomandos; el emisor informa `HTTP 202` y el worker imprime el evento recibido. El conjunto automatizado termina con ocho pruebas aprobadas.
-* **Defensa en video:** Muestra los tres comandos en ejecución y sigue el mismo `event_id` desde el envío hasta la salida del worker.
-
----
-
-### **Pautas Clave para el Video de Defensa**
-
-* **Tiempo:** Cada integrante debe exponer un máximo de **7 minutos**, sumando un total que no exceda los **35 minutos grupales**[8].
-* **Formato:** No es obligatorio encender la cámara web; basta con compartir la pantalla, mostrar el código bajo su firma y ejecutar la prueba o comando correspondiente en la terminal.
-* **Entrega:** El video se sube a YouTube (en oculto o público) o a Google Drive (con permisos abiertos) y se coloca el enlace en la sección correspondiente del `README.md`[19].
-
 
 ## Instalación
 
@@ -254,9 +176,3 @@ TP02/
 └── tests/
     └── test_caos.py
 ```
-
-La consigna compartida describe un receptor de webhooks que publique eventos
-asíncronamente en un broker Pub/Sub (RabbitMQ o AWS SQS). Esta implementación
-elige **AWS SQS**. El texto adicional recibido para “levantar nota” estaba
-incompleto, así que esta guía documenta los requisitos visibles sin inventar
-criterios que no fueron compartidos.
